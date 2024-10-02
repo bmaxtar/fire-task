@@ -2,14 +2,14 @@ import { router } from "expo-router";
 import { Image, Text, TouchableOpacity, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-export default function HomeScreen() {
+export default function StartScreen() {
   return (
     <SafeAreaView
-      style={{ flex: 1, backgroundColor: "#1c1b43", paddingHorizontal: 20 }}
+      style={{ flex: 1, backgroundColor: "#1c1b43", paddingHorizontal: 10 }}
     >
       <View style={{ justifyContent: "center", alignItems: "center" }}>
         <Image
-          source={require("../../assets/img1.png")}
+          source={require("../assets/img2.png")}
           style={{ with: 250, height: 400, resizeMode: "contain" }}
         />
         <Text
@@ -20,18 +20,8 @@ export default function HomeScreen() {
             paddingVertical: 20,
           }}
         >
-          Build the future by completing tasks.
-        </Text>
-        <Text
-          style={{
-            fontSize: 18,
-            color: "white",
-            fontWeight: "600",
-            paddingVertical: 20,
-          }}
-        >
-          Your tasks are bridges leading to the future. By completing them,
-          reach your potential and your dreams.
+          By completing your tasks, you unlock your potential and achieve
+          success.
         </Text>
       </View>
       <View
@@ -50,15 +40,15 @@ export default function HomeScreen() {
             justifyContent: "center",
             alignItems: "center",
           }}
-          onPress={() => router.navigate("/start")}
+          onPress={() => router.navigate("/login")}
         >
           <Text
             style={{
-              fontWeight: "600",
+              fontWeight: "700",
               textTransform: "uppercase",
             }}
           >
-            get started
+            next
           </Text>
         </TouchableOpacity>
       </View>
