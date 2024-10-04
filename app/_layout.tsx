@@ -35,15 +35,13 @@ export default function RootLayout() {
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <Provider store={store}>
-        <ThemeProvider
-          value={colorScheme === "dark" ? DarkTheme : DefaultTheme}
-        >
+      <ThemeProvider value={colorScheme === "dark" ? DarkTheme : DefaultTheme}>
+        <Provider store={store}>
           <Stack>
             <HomeScreen />
           </Stack>
-        </ThemeProvider>
-      </Provider>
+        </Provider>
+      </ThemeProvider>
     </GestureHandlerRootView>
   );
 }

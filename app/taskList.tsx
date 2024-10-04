@@ -8,6 +8,7 @@ import {
   TextInput,
   ActivityIndicator,
   Alert,
+  RefreshControl,
 } from "react-native";
 import {
   BottomSheetModal,
@@ -24,36 +25,37 @@ import {
   updateDoc,
   deleteDoc,
   doc,
-  getDocs,
+  onSnapshot,
 } from "firebase/firestore";
-import { router } from "expo-router";
+import { router, Stack } from "expo-router";
 import Toast from "react-native-toast-message";
 import { useDispatch, useSelector } from "react-redux";
-import {
-  setTasks,
-  addTask,
-  updateTask,
-  deleteTask,
-  Task,
-} from "@/store/tasksSlice";
+import { setTasks, Task } from "@/store/tasksSlice";
 
 const TaskListScreen = () => {
   const dispatch = useDispatch();
   const tasks = useSelector(
     (state: { tasks: { tasks: Task[] } }) => state.tasks.tasks
   );
-
   const [isEditing, setIsEditing] = useState<string | null>(null);
   const [newTitle, setNewTitle] = useState<string>("");
   const bottomSheetModalRef = useRef<BottomSheetModal | null>(null);
   const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
-    const fetchTasks = async () => {
-      setLoading(true);
-      try {
-        const querySnapshot = await getDocs(collection(database, "tasks"));
-        const tasksData = querySnapshot.docs.map((doc) => {
+    fetchTasks();
+  }, []);
+
+  const fetchTasks = async () => {
+    const id = Math.random();
+    setLoading(true);
+    const tasksRef = collection(database, "tasks");
+    const unsubscribe = onSnapshot(
+      tasksRef,
+      (snapshot) => {
+        console.log("fetchTasks", id);
+        const tasksData: Task[] = snapshot.docs.map((doc) => {
           const data = doc.data();
           return {
             id: doc.id,
@@ -63,25 +65,32 @@ const TaskListScreen = () => {
           };
         });
         dispatch(setTasks(tasksData));
-      } catch (error) {
-        console.error("Erreur lors de la récupération des tâches :", error);
-      } finally {
         setLoading(false);
+        setRefreshing(false);
+      },
+      (error) => {
+        console.error(
+          "Erreur lors de la récupération des tâches en temps réel :",
+          error
+        );
+        setLoading(false);
+        setRefreshing(false);
       }
-    };
-
-    fetchTasks();
-  }, [dispatch]);
+    );
+    return () => unsubscribe();
+  };
 
   const toggleCompletion = async (id: string) => {
     const task = tasks.find((task) => task.id === id);
     if (!task) return;
-
-    const updatedTask = { ...task, completed: !task.completed };
-    await updateDoc(doc(database, "tasks", id), {
-      completed: updatedTask.completed,
-    });
-    dispatch(updateTask(updatedTask));
+    try {
+      const updatedTask = { completed: !task.completed };
+      await updateDoc(doc(database, "tasks", id), {
+        completed: updatedTask.completed,
+      });
+    } catch (error) {
+      console.error("Erreur lors de la mise à jour de la tâche :", error);
+    }
   };
 
   const handleEdit = (id: string, title: string) => {
@@ -91,15 +100,17 @@ const TaskListScreen = () => {
 
   const saveEdit = async (id: string) => {
     if (newTitle.trim() === "") return;
-
-    const updatedTask = {
-      ...tasks.find((task) => task.id === id)!,
-      title: newTitle,
-    };
-    await updateDoc(doc(database, "tasks", id), { title: newTitle });
-    dispatch(updateTask(updatedTask));
-    setIsEditing(null);
-    setNewTitle("");
+    setLoading(true);
+    try {
+      await updateDoc(doc(database, "tasks", id), { title: newTitle });
+      setIsEditing(null);
+      setNewTitle("");
+    } catch (error) {
+      console.error("Erreur lors de la sauvegarde de la tâche :", error);
+      Alert.alert("Erreur", "Erreur lors de la sauvegarde de la tâche.");
+    } finally {
+      setLoading(false);
+    }
   };
 
   const deleteTaskHandler = async (id: string) => {
@@ -107,19 +118,26 @@ const TaskListScreen = () => {
       "Confirmation",
       "Es-tu sûr de vouloir supprimer cette tâche ?",
       [
-        {
-          text: "Annuler",
-          style: "cancel",
-        },
+        { text: "Annuler", style: "cancel" },
         {
           text: "Supprimer",
           onPress: async () => {
-            await deleteDoc(doc(database, "tasks", id));
-            dispatch(deleteTask(id));
-            Toast.show({
-              type: "success",
-              text1: "Tâche supprimée avec succès!",
-            });
+            try {
+              await deleteDoc(doc(database, "tasks", id));
+              Toast.show({
+                type: "success",
+                text1: "Tâche supprimée avec succès!",
+              });
+            } catch (error) {
+              console.error(
+                "Erreur lors de la suppression de la tâche :",
+                error
+              );
+              Toast.show({
+                type: "error",
+                text1: "Erreur lors de la suppression de la tâche",
+              });
+            }
           },
           style: "destructive",
         },
@@ -129,7 +147,6 @@ const TaskListScreen = () => {
 
   const addTaskHandler = async () => {
     if (newTitle.trim() === "") return;
-
     setLoading(true);
     try {
       const newTask = {
@@ -137,9 +154,7 @@ const TaskListScreen = () => {
         completed: false,
         favorite: false,
       };
-
-      const docRef = await addDoc(collection(database, "tasks"), newTask);
-      dispatch(addTask({ id: docRef.id, ...newTask }));
+      await addDoc(collection(database, "tasks"), newTask);
       setNewTitle("");
       bottomSheetModalRef.current?.close();
       Toast.show({ type: "success", text1: "Tâche ajoutée avec succès!" });
@@ -153,12 +168,14 @@ const TaskListScreen = () => {
   const toggleFavorite = async (id: string) => {
     const task = tasks.find((task) => task.id === id);
     if (!task) return;
-
-    const updatedTask = { ...task, favorite: !task.favorite };
-    await updateDoc(doc(database, "tasks", id), {
-      favorite: updatedTask.favorite,
-    });
-    dispatch(updateTask(updatedTask));
+    try {
+      const updatedTask = { favorite: !task.favorite };
+      await updateDoc(doc(database, "tasks", id), {
+        favorite: updatedTask.favorite,
+      });
+    } catch (error) {
+      console.error("Erreur lors de la mise à jour du favori :", error);
+    }
   };
 
   const logout = async () => {
@@ -180,25 +197,21 @@ const TaskListScreen = () => {
       </TouchableOpacity>
       <View style={styles.taskContainer}>
         {isEditing === item.id ? (
-          <View style={{ alignItems: "center" }}>
+          <View style={styles.editContainer}>
             <TextInput
-              style={styles.input}
+              style={styles.inputEditing}
               value={newTitle}
               onChangeText={setNewTitle}
             />
             <TouchableOpacity
-              style={{
-                backgroundColor: "#41c9e1",
-                padding: 5,
-                width: 100,
-                borderRadius: 10,
-                flexDirection: "row",
-                alignItems: "center",
-                justifyContent: "center",
-              }}
+              style={styles.saveButton}
               onPress={() => saveEdit(item.id)}
             >
-              <Ionicons name="checkmark-outline" size={20} color="#fff" />
+              {loading ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <Ionicons name="checkmark-outline" size={20} color="#fff" />
+              )}
             </TouchableOpacity>
           </View>
         ) : (
@@ -208,85 +221,111 @@ const TaskListScreen = () => {
             {item.title}
           </Text>
         )}
-        <View style={{ flexDirection: "row", alignItems: "center" }}>
-          <TouchableOpacity
-            style={{ marginLeft: 5 }}
-            onPress={() => toggleFavorite(item.id)}
-          >
-            <Ionicons
-              name={item.favorite ? "heart" : "heart-outline"}
-              size={18}
-              color="#ff6347"
-            />
-          </TouchableOpacity>
-          <TouchableOpacity
-            onPress={() => handleEdit(item.id, item.title)}
-            style={{ marginLeft: 10 }}
-          >
-            <FontAwesome name="pencil-square-o" size={18} color="#ff6347" />
-          </TouchableOpacity>
-          <TouchableOpacity
-            onPress={() => deleteTaskHandler(item.id)}
-            style={{ marginLeft: 10 }}
-          >
-            <Ionicons name="trash" size={18} color="red" />
-          </TouchableOpacity>
-        </View>
+
+        {!isEditing && (
+          <View style={styles.iconsContainer}>
+            <TouchableOpacity
+              style={{ marginLeft: 5 }}
+              onPress={() => toggleFavorite(item.id)}
+            >
+              <Ionicons
+                name={item.favorite ? "heart" : "heart-outline"}
+                size={24}
+                color="#ff6347"
+              />
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => handleEdit(item.id, item.title)}
+              style={{ marginLeft: 10 }}
+            >
+              <FontAwesome name="pencil-square-o" size={24} color="#ff6347" />
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => deleteTaskHandler(item.id)}
+              style={{ marginLeft: 10 }}
+            >
+              <Ionicons name="trash" size={24} color="red" />
+            </TouchableOpacity>
+          </View>
+        )}
       </View>
     </View>
   );
 
   return (
-    <BottomSheetModalProvider>
-      <View
-        style={{ flex: 1, backgroundColor: "#1E1B3C", paddingHorizontal: 10 }}
-      >
-        <View style={styles.header}>
-          <Text style={styles.headerText}>Liste des Tâches</Text>
-          <TouchableOpacity onPress={logout} style={styles.logoutUI}>
-            <Ionicons name="log-out-outline" size={18} color="#000" />
-          </TouchableOpacity>
-        </View>
-        {loading ? (
-          <ActivityIndicator size="large" color="#41c9e1" />
-        ) : (
-          <FlatList
-            data={tasks}
-            renderItem={renderTask}
-            keyExtractor={(item) => item.id}
-            style={{ marginTop: 20 }}
-          />
-        )}
-        <TouchableOpacity
-          style={styles.addButtonContainer}
-          onPress={() => bottomSheetModalRef.current?.present()}
+    <View style={{ flex: 1 }}>
+      <Stack.Screen
+        options={{
+          title: "Fire-Task",
+          headerRight: () => (
+            <View style={{ flexDirection: "row", alignItems: "center" }}>
+              <TouchableOpacity onPress={() => router.navigate("/profile")}>
+                <Ionicons name="person-outline" size={24} />
+              </TouchableOpacity>
+              <TouchableOpacity onPress={logout} style={styles.logoutUI}>
+                <Ionicons name="log-out-outline" size={18} color="#000" />
+              </TouchableOpacity>
+            </View>
+          ),
+        }}
+      />
+      <BottomSheetModalProvider>
+        <View
+          style={{ flex: 1, backgroundColor: "#1E1B3C", paddingHorizontal: 10 }}
         >
-          <Entypo name="plus" size={24} color="#fff" />
-        </TouchableOpacity>
-        <BottomSheetModal
-          ref={bottomSheetModalRef}
-          index={0}
-          snapPoints={["50%"]}
-          handleIndicatorStyle={{ backgroundColor: "#41c9e1" }}
-        >
-          <View style={styles.contentContainer}>
-            <TextInput
-              style={styles.input}
-              placeholder="Nouvelle Tâche"
-              value={newTitle}
-              onChangeText={setNewTitle}
-            />
-            <TouchableOpacity
-              style={styles.submitButton}
-              onPress={addTaskHandler}
-              disabled={loading}
-            >
-              <Text style={styles.submitButtonText}>Ajouter</Text>
-            </TouchableOpacity>
+          <View style={styles.header}>
+            <Text style={styles.headerText}>Liste des Tâches</Text>
           </View>
-        </BottomSheetModal>
-      </View>
-    </BottomSheetModalProvider>
+          {loading ? (
+            <ActivityIndicator size="large" color="#41c9e1" />
+          ) : tasks.length > 0 ? (
+            <FlatList
+              data={tasks}
+              renderItem={renderTask}
+              keyExtractor={(item) => item.id}
+            />
+          ) : (
+            <View style={{ alignItems: "center", marginTop: 50 }}>
+              <Text style={{ color: "#fff", fontSize: 18, fontWeight: "500" }}>
+                Aucune tâche disponible
+              </Text>
+            </View>
+          )}
+          <TouchableOpacity
+            style={styles.addTaskButton}
+            onPress={() => bottomSheetModalRef.current?.present()}
+          >
+            <Entypo name="plus" size={18} color="#fff" />
+            <Text style={{ color: "#fff", marginLeft: 5 }}>
+              Ajouter une tâche
+            </Text>
+          </TouchableOpacity>
+          <BottomSheetModal
+            ref={bottomSheetModalRef}
+            snapPoints={["40%", "90%"]}
+          >
+            <View style={{ flex: 1, padding: 10 }}>
+              <TextInput
+                placeholder="Nom de la tâche"
+                value={newTitle}
+                onChangeText={setNewTitle}
+                style={styles.inputModal}
+              />
+              <TouchableOpacity
+                style={styles.saveButtonAdd}
+                onPress={addTaskHandler}
+              >
+                {loading ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text style={{ color: "#fff" }}>Ajouter la tâche</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </BottomSheetModal>
+        </View>
+      </BottomSheetModalProvider>
+    </View>
   );
 };
 
@@ -295,105 +334,102 @@ export default TaskListScreen;
 const styles = StyleSheet.create({
   header: {
     flexDirection: "row",
-    alignItems: "center",
     justifyContent: "space-between",
-    paddingVertical: 20,
+    alignItems: "center",
+    paddingVertical: 10,
+    marginBottom: 20,
   },
   headerText: {
     fontSize: 24,
-    color: "white",
+    color: "#41c9e1",
   },
   logoutUI: {
-    backgroundColor: "white",
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: 10,
+    backgroundColor: "#41c9e1",
+    borderRadius: 5,
+    padding: 5,
+    marginLeft: 20,
   },
-  taskContainer: {
+  addTaskButton: {
+    position: "absolute",
+    bottom: 40,
+    right: 20,
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#fff",
-    paddingVertical: 10,
+    backgroundColor: "#41c9e1",
+    padding: 15,
     borderRadius: 10,
-    paddingHorizontal: 20,
-    marginHorizontal: 10,
-    marginVertical: 10,
   },
   circle: {
-    width: 20,
-    height: 20,
-    borderRadius: 5,
+    height: 24,
+    width: 24,
+    borderRadius: 12,
     borderWidth: 2,
-    borderColor: "#4CAF50",
+    borderColor: "#41c9e1",
   },
   circleCompleted: {
-    backgroundColor: "#4CAF50",
+    backgroundColor: "#41c9e1",
+  },
+  taskContainer: {
+    flex: 1,
+    justifyContent: "space-between",
+    flexDirection: "row",
+    alignItems: "center",
+    marginLeft: 10,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderColor: "#ccc",
+  },
+  editContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    flex: 1,
+  },
+  inputEditing: {
+    borderColor: "#41c9e1",
+    borderWidth: 1,
+    borderRadius: 5,
+    padding: 5,
+    color: "#fff",
+    flex: 1,
+    marginRight: 10,
+  },
+  iconsContainer: {
+    flexDirection: "row",
+    alignItems: "center",
   },
   taskText: {
-    flex: 1,
     fontSize: 16,
-    color: "#333",
+    color: "#fff",
   },
   completedTask: {
     textDecorationLine: "line-through",
-    color: "#999",
-  },
-  modalContent: {
-    flex: 1,
-    padding: 20,
-    justifyContent: "space-between",
+    color: "#888",
   },
   input: {
-    flex: 1,
-    fontSize: 16,
-    borderBottomWidth: 1,
-    borderColor: "#F2F2F2",
-    marginBottom: 20,
+    borderColor: "#41c9e1",
     borderWidth: 1,
-    marginRight: 10,
-    borderRadius: 10,
+    borderRadius: 5,
     padding: 10,
+    height: 50,
   },
-  buttonContainer: {
-    alignItems: "center",
+  inputModal: {
+    borderColor: "#41c9e1",
+    borderWidth: 1,
+    borderRadius: 5,
+    padding: 10,
+    height: 50,
   },
   saveButton: {
     backgroundColor: "#41c9e1",
-    padding: 15,
-    borderRadius: 10,
-    width: "100%",
-  },
-  addButtonContainer: {
-    justifyContent: "center",
+    padding: 10,
+    borderRadius: 5,
     alignItems: "center",
-    alignSelf: "flex-end",
-    marginBottom: 20,
-    backgroundColor: "#41c9e1",
-    borderRadius: 10,
-    width: 50,
-    height: 50,
   },
-  addButton: {
+  saveButtonAdd: {
     backgroundColor: "#41c9e1",
     padding: 10,
-    borderRadius: 10,
+    marginTop: 10,
+    borderRadius: 5,
     alignItems: "center",
-  },
-  contentContainer: {
-    flex: 1,
-    padding: 20,
-    justifyContent: "space-between",
-  },
-  submitButton: {
-    backgroundColor: "#41c9e1",
-    padding: 15,
-    borderRadius: 10,
-    width: "100%",
-  },
-  submitButtonText: {
-    textAlign: "center",
-    fontWeight: "600",
-    fontSize: 18,
-    color: "white",
   },
 });

@@ -29,7 +29,6 @@ export default function LoginScreen() {
       return;
     }
 
-    // Validation simple de l'email
     const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailPattern.test(email)) {
       Toast.show({
@@ -54,7 +53,6 @@ export default function LoginScreen() {
         text2: "Bienvenue!",
       });
 
-      // Stockage de l'email dans AsyncStorage
       await AsyncStorage.setItem("lastEmail", email);
       router.navigate("/taskList");
     } catch (error) {
